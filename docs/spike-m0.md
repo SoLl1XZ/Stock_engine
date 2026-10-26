@@ -12,7 +12,7 @@ Målt lokalt (Eriks Mac) den 26. oktober 2026. Koden i `spike/` er engangskode. 
 
 - Forespørgslen sender `User-Agent: Stock Engine 222303744+SoLl1XZ@users.noreply.github.com` (= `stock_engine.config.SEC_USER_AGENT`) og `Accept-Encoding: gzip, deflate`. Verificeret på `r.request.headers`.
 - Svar: `403`, `server: AkamaiGHost`, HTML-side med titlen **"SEC.gov | Request Rate Threshold Exceeded"** ("Automated access ... must comply with ... Fair Access guidelines", Reference ID `0.874bc717...`).
-- Det er altså en **rate-/adgangsblokering af vores IP hos SEC**, ikke en manglende header. Blokeringen gælder hele SEC: også `data.sec.gov/submissions/CIK0000320193.json`, `.../companyfacts.zip` og `www.sec.gov/robots.txt` svarer 403.
+- **403 fra SEC.** SEC's svarside siger "Request Rate Threshold Exceeded", men årsagen er ikke fastslået (se nedenfor). Lokalt gælder 403 hele SEC: også `data.sec.gov/submissions/CIK0000320193.json`, `.../companyfacts.zip` og `www.sec.gov/robots.txt` svarer 403.
 - Jeg forsøgte efterfølgende med 1 forespørgsel hver 1-2,5 min i ca. 25 min (i alt ~10 enkeltforespørgsler): stadig 403. Ingen omgåelse forsøgt (ingen anden UA, ingen proxy).
 - Årsagen er ikke fastslået. Mulige forklaringer: (a) tidligere spike-kørsler fra den døde session ramte grænsen (ukendt hvor mange kald, 12:32-13:08), (b) IP'en er delt eller allerede markeret, (c) blokeringen varer længere end 25 min. Kun SEC kan svare sikkert.
 - **Konsekvens:** SEC-bulk (`companyfacts.zip`, `submissions.zip`) er **ikke målt**. Tallene herunder er tomme. Tasks 3-5 bygger på SEC og kan ikke verificeres mod rigtige data, før adgangen er tilbage (blokeringen afventes; ingen omvej forsøges).
@@ -47,7 +47,7 @@ Tallene overlapper (yfinance logger flere linjer pr. ticker), og i alt fejlede 4
 
 - 200 tilfældige af de 4.511 fejlede tickers, hentet **én ad gangen** (`threads=False`, 0,3 s pause).
 - **Genfundet: 200/200 (100 %)** på 142 s (0,7 s pr. ticker).
-- Konklusion: resultatet **tyder på**, at fejlene i bulk-kørslen ikke skyldes manglende data, men at Yahoo afviste/begrænsede de parallelle forespørgsler (4.951 linjer med `curl: (7)` forbindelse afvist). Det er ikke bevist: stikprøven er kun 200 sekventielle hentninger (ikke parallelle), og den kørte ca. 2 timer efter bulk-kørslen, så et midlertidigt Yahoo-/netværksproblem under bulk-kørslen kan ikke skelnes fra throttling. Det er uverificeret, hvad "possibly delisted" betyder her: yfinance skriver teksten også for rigtigt manglende data, og jeg har ikke dokumenteret, at den også skrives ved begrænsning.
+- Konklusion: resultatet **tyder på**, at fejlene i den lokale bulk-kørsel ikke skyldes manglende data (4.951 linjer med `curl: (7)` forbindelse afvist). Samme kode på Actions-runneren gav ingen kollaps (se nedenfor), så årsagen ser ud til at ligge lokalt frem for i yfinance ved denne skala. Det er ikke bevist: stikprøven er kun 200 sekventielle hentninger (ikke parallelle), og den kørte ca. 2 timer efter bulk-kørslen, så et midlertidigt lokalt eller Yahoo-problem kan ikke udelukkes. Det er uverificeret, hvad "possibly delisted" betyder her: yfinance skriver teksten også for rigtigt manglende data, og jeg har ikke dokumenteret, at den også skrives ved begrænsning.
 - Hele universet sekventielt: 6.640 x 0,7 s ≈ 78 min. Det skal tages med i beslutningen om kørselstid i Actions.
 
 ### Universet er forurenet
@@ -66,10 +66,16 @@ Nasdaqtrader-listen indeholder papirer, der ikke er almindelige aktier: mindst 4
 
 `data/raw/` er tom. `spike/sec_bulk.py` er uændret og kan køres igen, når SEC-adgangen er tilbage.
 
-## Actions-runner (afventer Eriks ok)
+## Actions-runner (26. oktober 2026)
 
-Ikke målt. Kræver et offentligt GitHub-repo, `spike.yml` og et push, og det må ikke ske uden Eriks ja (Task 2, trin 4). Den lokale SEC-blokering afventes (ingen omvej). SEC-adgang fra Actions måles som en del af den planlagte runner-måling, fordi det er dér, pipelinen skal køre.
+- **Kørsel:** workflow `.github/workflows/spike.yml`, run https://github.com/SoLl1XZ/Stock_engine/actions/runs/40350599806, `ubuntu-latest`. Samme scripts, uændrede.
+- **Tickers:** SEC svarede 403 også på runneren, så den samme nasdaqtrader-fallback-liste blev brugt (6.640 symboler).
+- **Kurser (yfinance):** 6.639 / 6.640 fik kurs (99,98 %) på 656 s i alt, ca. 8,3 s pr. batch á 100 (67 batches). Ingen batch kollapsede. Den ene fejl var ABOS med `OperationalError('database is locked')` fra yfinances lokale cache, ikke fra Yahoo.
+- **Sammenligning:** Det lokale kollaps (32,1 %) ser derfor ud til at hænge sammen med den lokale maskine/IP og ikke med yfinance ved denne skala.
+- **SEC bulk:** begge zips svarede 403 efter 0,1 s også fra runneren. Zip-størrelser og tider er stadig ikke målt.
+- **SEC-årsag (hypotese, IKKE verificeret):** SEC's 403-side (hentet én gang lokalt) siger kun, at automatisk adgang skal overholde SEC.govs Privacy and Security Policy, og henviser til www.sec.gov/developer (Fair Access). Sidens titel er "Request Rate Threshold Exceeded". Fordi en frisk runner-IP også fik 403 ved de allerførste forespørgsler, er den sandsynlige årsag User-Agent'en (vores noreply-adresse er muligvis ikke accepteret som kontaktadresse), ikke request-raten. Hypotesen er ikke testet.
 
 ## Beslutning: afventer Erik
 
-Anbefaling (ét udsagn): De 32 % kan ikke sammenlignes med 95 %-kravet, fordi universet er forkert (nasdaqtrader-liste med warrants/rights/units, ikke SEC-universet), og kravet gælder runneren. Retry-stikprøven (200/200) tyder på throttling, ikke dårlig datadækning. Mål derfor på Actions-runneren med **lavere parallelitet** (fx `threads=False` eller små batches) før valget af kilde, og vent med Task 9, til det tal er kendt.
+- **Kurser:** kriteriet (≥ 95 % på runneren) er opfyldt (99,98 %). Forbehold: listen indeholder warrants, units og rights, så det er ikke et rent almindelige-aktier-univers. Anbefaling: fortsæt med yfinance (Task 9). Beslutning: afventer Erik.
+- **SEC:** blokeret både lokalt og på runneren; skal løses før Task 11's rigtige kørsel. Næste skridt afventer Erik (fx en User-Agent med en rigtig kontaktadresse via miljøvariabel, ikke i koden).
