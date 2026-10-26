@@ -91,3 +91,113 @@ def fiscal_label(end: date, fiscal_year_end: str, annual: bool) -> str:
         return f"FY{fy_end.year}"
     quarter = 4 - round((fy_end - end).days / 91.3)
     return f"Q{quarter} FY{fy_end.year}"
+
+
+def annual_values(facts: list[Fact]) -> dict[date, float]:
+    return {f.end: f.val for f in facts if f.start is not None and duration_days(f) in ANNUAL_DAYS}
+
+
+def instant_values(facts: list[Fact]) -> dict[date, float]:
+    return {f.end: f.val for f in facts if f.start is None}
+
+
+def quarterly_values(facts: list[Fact]) -> dict[date, float]:
+    flows = [f for f in facts if f.start is not None]
+    quarters = {f.end: f.val for f in flows if duration_days(f) in QUARTER_DAYS}
+    for annual in (f for f in flows if duration_days(f) in ANNUAL_DAYS):
+        # 10-Q cash flows are year-to-date (3M, 6M, 9M, 12M), so a quarter is the difference between neighbours.
+        cumulative = sorted(
+            (f for f in flows if abs((f.start - annual.start).days) <= 3 and f.end <= annual.end),
+            key=lambda f: f.end,
+        )
+        for previous, current in zip([None] + cumulative, cumulative):
+            span = duration_days(current) - (duration_days(previous) if previous else 0)
+            if current.end not in quarters and span in QUARTER_DAYS:
+                # shortcut: per-share items (EPS, DPS) are derived by subtraction like flows, slightly off when share count changes within the year
+                quarters[current.end] = current.val - (previous.val if previous else 0)
+        if annual.end not in quarters:
+            inside = [
+                v
+                for end, v in quarters.items()
+                if annual.start + timedelta(days=80) <= end <= annual.end - timedelta(days=80)
+            ]
+            if len(inside) == 3:
+                quarters[annual.end] = annual.val - sum(inside)
+    return quarters
+
+
+def ttm(quarterly: dict[date, float], as_of: date, kind: str) -> float | None:
+    ends = sorted(end for end in quarterly if end <= as_of)
+    if kind == "instant":
+        return quarterly[ends[-1]] if ends else None
+    last_four = ends[-4:]
+    if len(last_four) < 4:
+        return None
+    # A gap over 100 days means a quarter is missing, so the sum would not cover a full year.
+    if any((b - a).days > 100 for a, b in zip(last_four, last_four[1:])):
+        return None
+    return sum(quarterly[end] for end in last_four)
+
+
+def _instant_near(values: dict[date, float], end: date) -> float | None:
+    close = [d for d in values if abs((d - end).days) <= 7]
+    return values[min(close, key=lambda d: abs((d - end).days))] if close else None
+
+
+def _free_cash_flow(operating_cash_flow: float | None, capex: float | None) -> float | None:
+    if operating_cash_flow is None or capex is None:
+        return None
+    return operating_cash_flow - capex
+
+
+def build_statements(companyfacts: dict, fiscal_year_end: str) -> dict:
+    annual: dict[str, dict[date, float]] = {}
+    quarterly: dict[str, dict[date, float]] = {}
+    instants: dict[str, dict[date, float]] = {}
+    for item, concept in CONCEPTS.items():
+        facts = extract_facts(companyfacts, item)
+        if concept.kind == "flow":
+            annual[item] = annual_values(facts)
+            quarterly[item] = quarterly_values(facts)
+        else:
+            instants[item] = instant_values(facts)
+
+    def table(ends: list[date], is_annual: bool) -> dict:
+        flows = annual if is_annual else quarterly
+        result: dict = {
+            "end": [end.isoformat() for end in ends],
+            "label": [fiscal_label(end, fiscal_year_end, is_annual) for end in ends],
+        }
+        for item in CONCEPTS:
+            if item in flows:
+                result[item] = [flows[item].get(end) for end in ends]
+            else:
+                result[item] = [_instant_near(instants[item], end) for end in ends]
+        result["free_cash_flow"] = [
+            _free_cash_flow(o, c) for o, c in zip(result["operating_cash_flow"], result["capex"])
+        ]
+        return result
+
+    def ttm_at(as_of: date | None) -> dict:
+        result: dict = {}
+        for item, concept in CONCEPTS.items():
+            if as_of is None:
+                result[item] = None
+            elif concept.kind == "flow":
+                result[item] = ttm(quarterly[item], as_of, "flow")
+            else:
+                result[item] = ttm(instants[item], as_of, "instant")
+        result["free_cash_flow"] = _free_cash_flow(result["operating_cash_flow"], result["capex"])
+        return result
+
+    annual_ends = sorted(set(annual["revenue"]) | set(annual["net_income"]))
+    quarter_ends = sorted(set(quarterly["revenue"]) | set(quarterly["net_income"]))
+    latest = quarter_ends[-1] if quarter_ends else None
+    prior_candidates = [e for e in quarter_ends if latest and e <= latest - timedelta(days=350)]
+    return {
+        "annual": table(annual_ends[-11:], True),
+        "quarterly": table(quarter_ends[-12:], False),
+        "ttm": ttm_at(latest),
+        "ttm_prior": ttm_at(prior_candidates[-1] if prior_candidates else None),
+        "latest_quarter_end": latest.isoformat() if latest else None,
+    }
