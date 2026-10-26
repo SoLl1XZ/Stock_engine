@@ -9,7 +9,7 @@ import httpx
 import yfinance as yf
 from yfinance import shared
 
-from stock_engine.config import SEC_USER_AGENT
+from stock_engine.config import sec_user_agent
 
 BATCH_SIZE = 100
 PAUSE_SECONDS = 1.5  # fixed courtesy pause between batches, no evasion
@@ -19,7 +19,7 @@ LOG = "spike/out/prices.log"
 def sec_tickers() -> list[str]:
     resp = httpx.get(
         "https://www.sec.gov/files/company_tickers_exchange.json",
-        headers={"User-Agent": SEC_USER_AGENT},
+        headers={"User-Agent": sec_user_agent()},
         timeout=60,
     )
     resp.raise_for_status()

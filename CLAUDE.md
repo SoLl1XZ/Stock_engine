@@ -14,6 +14,8 @@ python3.11 -m venv .venv
 cp .env.example .env                          # FINNHUB_API_KEY bruges først fra M4
 ```
 
+Udfyld `SEC_CONTACT_EMAIL` i `.env` (SEC kræver en rigtig kontaktadresse); i GitHub som secret `SEC_CONTACT_EMAIL`.
+
 ## Test
 
 ```bash

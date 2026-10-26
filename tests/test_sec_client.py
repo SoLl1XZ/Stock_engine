@@ -1,7 +1,6 @@
 import httpx
 import pytest
 
-from stock_engine.config import SEC_USER_AGENT
 from stock_engine.sec_client import SecClient
 
 
@@ -20,6 +19,9 @@ class FakeTime:
         self.now += seconds
 
 
+TEST_USER_AGENT = "Stock Engine test@example.com"
+
+
 def make_client(handler, max_per_second: float = 8) -> tuple[SecClient, FakeTime]:
     fake = FakeTime()
     client = SecClient(
@@ -27,6 +29,7 @@ def make_client(handler, max_per_second: float = 8) -> tuple[SecClient, FakeTime
         max_per_second=max_per_second,
         sleep=fake.sleep,
         clock=fake.clock,
+        user_agent=TEST_USER_AGENT,
     )
     return client, fake
 
@@ -40,7 +43,19 @@ def test_sends_user_agent() -> None:
 
     client, _ = make_client(handler)
     assert client.get_json("https://example.test/a") == {"ok": True}
-    assert seen == [SEC_USER_AGENT]
+    assert seen == [TEST_USER_AGENT]
+
+
+def test_default_user_agent_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("SEC_CONTACT_EMAIL", "test@example.com")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["User-Agent"])
+        return httpx.Response(200, json={})
+
+    SecClient(transport=httpx.MockTransport(handler)).get_json("https://example.test/a")
+    assert seen == ["Stock Engine test@example.com"]
 
 
 def test_retries_then_succeeds() -> None:

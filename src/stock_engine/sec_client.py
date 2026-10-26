@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 
-from stock_engine.config import SEC_USER_AGENT
+from stock_engine.config import sec_user_agent
 
 BACKOFF_SECONDS: tuple[float, ...] = (1, 2, 4)
 
@@ -16,10 +16,11 @@ class SecClient:
         max_per_second: float = 8,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        user_agent: str | None = None,
     ) -> None:
         self._client = httpx.Client(
             transport=transport,
-            headers={"User-Agent": SEC_USER_AGENT},
+            headers={"User-Agent": user_agent or sec_user_agent()},
             follow_redirects=True,
             timeout=60,
         )

@@ -5,7 +5,7 @@ import zipfile
 
 import httpx
 
-from stock_engine.config import RAW_DIR, SEC_USER_AGENT
+from stock_engine.config import RAW_DIR, sec_user_agent
 
 URLS = {
     "companyfacts": "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip",
@@ -17,7 +17,7 @@ for name, url in URLS.items():
     path = RAW_DIR / f"{name}.zip"
     t0 = time.time()
     status = None
-    with httpx.stream("GET", url, headers={"User-Agent": SEC_USER_AGENT}, timeout=600,
+    with httpx.stream("GET", url, headers={"User-Agent": sec_user_agent()}, timeout=600,
                       follow_redirects=True) as r:
         status = r.status_code
         if r.status_code == 200:

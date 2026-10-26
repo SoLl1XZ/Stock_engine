@@ -15,6 +15,9 @@ jobs:
   spike:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # SEC requires a real contact address in the User-Agent; it lives in a secret, not in the repo.
+    env:
+      SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
     steps:
       - uses: actions/checkout@v4
 
