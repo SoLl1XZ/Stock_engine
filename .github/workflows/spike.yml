@@ -1,0 +1,53 @@
+name: M0 spike
+
+on:
+  workflow_dispatch:
+  # workflow_dispatch only works once the file is on the default branch,
+  # so this push trigger starts the first run from feat/m0-m3.
+  push:
+    branches: [feat/m0-m3]
+    paths: [".github/workflows/spike.yml", "spike/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Create output dir
+        run: mkdir -p spike/out
+
+      # continue-on-error: a failing measurement must not stop the artifact upload below.
+      - name: Prices (yfinance)
+        shell: bash
+        # pipefail so a crash in the Python script fails the step, not just tee
+        run: set -o pipefail && python spike/prices_scale.py 2>&1 | tee spike/out/prices.stdout
+        timeout-minutes: 60
+        continue-on-error: true
+
+      - name: SEC bulk
+        shell: bash
+        run: set -o pipefail && python spike/sec_bulk.py 2>&1 | tee spike/out/sec_bulk.stdout
+        timeout-minutes: 20
+        continue-on-error: true
+
+      # Only spike/out (JSON + stdout logs). data/raw is not uploaded: the zips are GBs.
+      - name: Upload spike output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-out
+          path: spike/out/
+          retention-days: 14
