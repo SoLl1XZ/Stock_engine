@@ -89,6 +89,9 @@ def _rebased_tickers(fresh_adj: pd.DataFrame, cached_adj: pd.DataFrame) -> list[
     """Tickers whose fresh adj_close differs from the cache on overlapping dates (split or dividend)."""
     dates = fresh_adj.index.intersection(cached_adj.index)
     columns = fresh_adj.columns.intersection(cached_adj.columns)
+    # Without a shared date and ticker there is nothing to compare (e.g. a run of only new tickers).
+    if dates.empty or columns.empty:
+        return []
     fresh, cached = fresh_adj.loc[dates, columns], cached_adj.loc[dates, columns]
     differs = ((fresh - cached).abs() > REBASE_TOLERANCE * cached.abs()).any()
     return list(differs[differs].index)

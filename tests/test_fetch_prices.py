@@ -180,3 +180,16 @@ def test_duplicate_dates_in_fetched_data_are_dropped(tmp_path):
 
     close, adj_close = load_prices(tmp_path)
     assert close.index.is_unique and adj_close.index.is_unique
+
+
+def test_new_tickers_only_with_existing_cache(tmp_path):
+    write_cache(tmp_path, "AAA", "2026-10-20", 10.0)
+    fetch = FakeFetch()
+
+    result = update_prices(["NEW"], tmp_path, fetch)
+
+    assert fetch.calls == [(["NEW"], None)]
+    assert result == UpdateResult(ok=1, failed=[])
+    close, _ = load_prices(tmp_path)
+    assert close.loc["2026-10-20", "AAA"] == 10.0
+    assert "NEW" in close.columns
